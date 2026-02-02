@@ -13,20 +13,20 @@ jobs:
     outputs:
       commit_message: ${{ steps.get_message.outputs.message }}
     name: Check if the workflow has been disabled.
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - name: Get commit message
         id: get_message
         run: |
-          echo "::set-output name=message::$(git log --format=%B -n 1 ${{ github.event.after }} | tr '\n' ' ')"
+          echo "message=$(git log --format=%B -n 1 ${{ github.event.after }} | tr '\n' ' ')" >> $GITHUB_OUTPUT
           echo "message=\"$(git log --format=%B -n 1 ${{ github.event.after }} | tr '\n' ' ')\"" >> $GITHUB_ENV
   build:
     needs: check_commit_msg
     if: ${{ !contains( needs.check_commit_msg.outputs.commit_message, '!QT5') }}
     strategy:
       matrix:
-        platform: [ubuntu-20.04, macos-latest, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         arch: [x64]
         build_type: [RelWithDebInfo, Release]
         qt_version: [5.15.0]
@@ -46,15 +46,15 @@ jobs:
       - name: Get the version
         id: get_version
         shell: bash
-        run: echo ::set-output name=VERSION::$(echo $GITHUB_REF | cut -d / -f 3)
+        run: echo "VERSION=$(echo $GITHUB_REF | cut -d / -f 3)" >> $GITHUB_OUTPUT
       - name: Checking out sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      - name: Install Python 3.10 version
-        uses: actions/setup-python@v4
+      - name: Install Python 3.12 version
+        uses: actions/setup-python@v5
         with:
-            python-version: '3.10'
+            python-version: '3.12'
       # =========================================================================================================
       - name: Install MSVC compiler
         if: matrix.platform == 'windows-latest'
@@ -65,19 +65,20 @@ jobs:
           arch: ${{ matrix.arch }}
       - name: Cache Qt
         id: cache-qt
-        uses: actions/cache@v1
+        uses: actions/cache@v4
         with:
           path: ../Qt
           key: QtCache-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.qt_version }}
       - name: Installing Qt - ${{ matrix.arch }}
-        uses: jurplel/install-qt-action@v2
+        uses: jurplel/install-qt-action@v3
         with:
           version: ${{ matrix.qt_version }}
           arch: ${{ matrix.qtarch }}
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
+          set-env: 'true'
       # =========================================================================================================
       - name: Linux - ${{ matrix.qt_version }} - Build preparation - Install Packages
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y libgl-dev libx11-dev libxkbcommon-x11-dev libxcb-image0-dev libxcb-icccm4-dev libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 \
@@ -85,7 +86,7 @@ jobs:
               ninja-build \
               fcitx-frontend-qt5 \
               fcitx5-frontend-qt5 \
-              libcurl4-openssl-dev libssl-dev fuse
+              libcurl4-openssl-dev libssl-dev libfuse2
       # --------------------------------------------------------
       - name: macOS - ${{ matrix.qt_version }} - Build preparation - Install Packages
         if: matrix.platform == 'macos-latest'
@@ -148,7 +149,7 @@ jobs:
           cp -v ./*.pdb ./deployment || true
       # --------------------------------------------------------
       - name: Linux - ${{ matrix.qt_version }} - Generate Dependencies and Build
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'ubuntu-latest'
         shell: bash
         run: |
           mkdir build
@@ -162,12 +163,13 @@ jobs:
           cmake --install .
       # ========================================================================================================= Deployments
       - name: Linux - ${{ matrix.qt_version }} - Generating AppImage
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'ubuntu-latest'
         run: |
           cd build
           cd AppDir
           mkdir -p ./usr/lib/
-          cp -fv /usr/lib/x86_64-linux-gnu/{libssl.so.1.1,libcrypto.so.1.1} ./usr/lib/
+          cp -fv /usr/lib/x86_64-linux-gnu/libssl.so* ./usr/lib/
+          cp -fv /usr/lib/x86_64-linux-gnu/libcrypto.so* ./usr/lib/
           cd ..
           wget https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
           chmod +x ./linuxdeployqt-continuous-x86_64.AppImage
@@ -175,17 +177,18 @@ jobs:
               -appimage \
               -no-strip \
               -always-overwrite \
+              -unsupported-allow-new-glibc \
               -extra-plugins=iconengines,imageformats,platforminputcontexts
           mv ./Qv2ray*.AppImage ./Qv2ray.AppImage
       - name: Linux - ${{ matrix.qt_version }} - Uploading Artifact
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'ubuntu-latest'
         uses: actions/upload-artifact@master
         with:
           name: Qv2ray-${{ github.sha }}.linux-${{ matrix.arch }}.qt${{ matrix.qt_version }}-${{ matrix.build_type }}.AppImage
           path: build/Qv2ray.AppImage
       - name: Linux - ${{ matrix.qt_version }} - Upload binaries to release
         uses: svenstaro/upload-release-action@v1-release
-        if: github.event_name == 'release' && matrix.platform == 'ubuntu-20.04' && matrix.qt_version == '5.15.0' && matrix.build_type == 'Release'
+        if: github.event_name == 'release' && matrix.platform == 'ubuntu-latest' && matrix.qt_version == '5.15.0' && matrix.build_type == 'Release'
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: build/Qv2ray.AppImage
